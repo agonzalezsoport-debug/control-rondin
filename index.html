@@ -400,47 +400,49 @@
             html5QrCode.stop().then(() => {
                 document.getElementById('start-btn').style.display = 'inline-flex';
                 document.getElementById('camera-holder').style.display = 'none';
-            }).catch(err => console.error("Error al apagar:", err));
+            }).catch(err => console.error("Error al detener:", err));
         }
     }
 
     function iniciarEscaneo() {
-        // 1. Primero mostramos el contenedor en el diseño para que tenga dimensiones reales (no 0x0)
         document.getElementById('start-btn').style.display = 'none';
         document.getElementById('camera-holder').style.display = 'block';
         document.getElementById('status').style.display = 'none';
         
-        // 2. Agregamos un retraso mínimo de 300 milisegundos para dar tiempo al celular a procesar el cambio visual
         setTimeout(() => {
             try {
                 if (!html5QrCode) {
                     html5QrCode = new Html5Qrcode("reader");
                 }
                 
-                // 3. Solicitamos el encendido usando parámetros flexibles para evitar bloqueos nativos
+                // OPTIMIZACIÓN: Parámetros simplificados y fluidos para forzar la inicialización nativa
                 html5QrCode.start(
-                    { facingMode: "environment" }, // Preferir cámara trasera
+                    { facingMode: "environment" }, // Prioriza estrictamente la cámara trasera
                     {
                         fps: 10,
-                        qrbox: function(viewfinderWidth, viewfinderHeight) {
-                            // Cuadro de escaneo adaptivo para evitar congelamientos en pantallas chicas
-                            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-                            const qrboxEdgeSize = Math.floor(minEdge * 0.6);
-                            return { width: qrboxEdgeSize, height: qrboxEdgeSize };
-                        }
+                        qrbox: (width, height) => {
+                            const size = Math.floor(Math.min(width, height) * 0.65);
+                            return { width: size, height: size };
+                        },
+                        // Evita que la librería use configuraciones que congelan pantallas en Android
+                        aspectRatio: 1.0
                     },
                     onScanSuccess,
                     onScanFailure
                 ).catch(err => {
-                    console.error("Falla al encender cámara:", err);
-                    mostrarEstado("⚠️ Permiso denegado o cámara ocupada. Revisa los permisos de tu navegador y recarga.", "error");
-                    document.getElementById('start-btn').style.display = 'inline-flex';
-                    document.getElementById('camera-holder').style.display = 'none';
+                    console.error("Error directo de cámara:", err);
+                    // Si falla, intentamos un segundo inicio con el método de fallback básico por si el celular es antiguo
+                    html5QrCode.start({ facingMode: "user" }, { fps: 10, qrbox: 250 }, onScanSuccess, onScanFailure)
+                    .catch(e => {
+                        mostrarEstado("⚠️ El sistema operativo de tu celular bloqueó el inicio de la cámara. Por favor, verifica los permisos de la aplicación Chrome en los Ajustes de tu teléfono.", "error");
+                        document.getElementById('start-btn').style.display = 'inline-flex';
+                        document.getElementById('camera-holder').style.display = 'none';
+                    });
                 });
             } catch (e) {
-                console.error("Error crítico de inicialización:", e);
+                console.error("Error de inicialización:", e);
             }
-        }, 300);
+        }, 200);
     }
 
     function onScanSuccess(decodedText) {
@@ -474,9 +476,7 @@
         });
     }
 
-    function onScanFailure(error) {
-        // Búsqueda silenciosa de códigos QR
-    }
+    function onScanFailure(error) {}
 
     function mostrarEstado(mensaje, tipo) {
         const s = document.getElementById('status');
@@ -535,8 +535,3 @@
         }
     }
 </script>
-
-
-</body>
-</html>
-
