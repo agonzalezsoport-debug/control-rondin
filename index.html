@@ -378,7 +378,7 @@
 </div>
 
 <script>
-    let html5QrCode; // Cambiamos a la instancia directa del motor
+    let html5QrCode = null;
 
     function switchTab(tab) {
         document.querySelectorAll('.nav-item').forEach(t => t.classList.remove('active'));
@@ -390,80 +390,92 @@
         } else {
             document.getElementById('tab-reportes').classList.add('active');
             document.getElementById('panel-reportes').classList.add('active');
-            // Si cambian de pestaña, apagamos la cámara para liberar el hardware
-            if (html5QrCode && html5QrCode.isScanning) {
-                html5QrCode.stop().then(() => {
-                    document.getElementById('start-btn').style.display = 'inline-flex';
-                    document.getElementById('camera-holder').style.display = 'none';
-                });
-            }
+            apagarCamara();
             cargarTabla();
         }
     }
 
+    function apagarCamara() {
+        if (html5QrCode && html5QrCode.isScanning) {
+            html5QrCode.stop().then(() => {
+                document.getElementById('start-btn').style.display = 'inline-flex';
+                document.getElementById('camera-holder').style.display = 'none';
+            }).catch(err => console.error("Error al apagar:", err));
+        }
+    }
+
     function iniciarEscaneo() {
+        // 1. Primero mostramos el contenedor en el diseño para que tenga dimensiones reales (no 0x0)
         document.getElementById('start-btn').style.display = 'none';
         document.getElementById('camera-holder').style.display = 'block';
         document.getElementById('status').style.display = 'none';
         
-        // Inicializamos el motor directo sobre el contenedor
-        html5QrCode = new Html5Qrcode("reader");
-        
-        // Arrancamos forzando la cámara trasera y pidiendo el permiso de forma nativa
-        html5QrCode.start(
-            { facingMode: "environment" }, // Cámara trasera
-            {
-                fps: 15,
-                qrbox: { width: 220, height: 220 }
-            },
-            onScanSuccess,
-            onScanFailure
-        ).catch(err => {
-            // Si el celular bloquea el inicio, le avisamos al usuario por qué
-            console.error(err);
-            mostrarEstado("⚠️ No se pudo acceder a la cámara. Asegúrate de cerrar otras apps que la usen y recargar la página.", "error");
-            document.getElementById('start-btn').style.display = 'inline-flex';
-            document.getElementById('camera-holder').style.display = 'none';
-        });
+        // 2. Agregamos un retraso mínimo de 300 milisegundos para dar tiempo al celular a procesar el cambio visual
+        setTimeout(() => {
+            try {
+                if (!html5QrCode) {
+                    html5QrCode = new Html5Qrcode("reader");
+                }
+                
+                // 3. Solicitamos el encendido usando parámetros flexibles para evitar bloqueos nativos
+                html5QrCode.start(
+                    { facingMode: "environment" }, // Preferir cámara trasera
+                    {
+                        fps: 10,
+                        qrbox: function(viewfinderWidth, viewfinderHeight) {
+                            // Cuadro de escaneo adaptivo para evitar congelamientos en pantallas chicas
+                            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+                            const qrboxEdgeSize = Math.floor(minEdge * 0.6);
+                            return { width: qrboxEdgeSize, height: qrboxEdgeSize };
+                        }
+                    },
+                    onScanSuccess,
+                    onScanFailure
+                ).catch(err => {
+                    console.error("Falla al encender cámara:", err);
+                    mostrarEstado("⚠️ Permiso denegado o cámara ocupada. Revisa los permisos de tu navegador y recarga.", "error");
+                    document.getElementById('start-btn').style.display = 'inline-flex';
+                    document.getElementById('camera-holder').style.display = 'none';
+                });
+            } catch (e) {
+                console.error("Error crítico de inicialización:", e);
+            }
+        }, 300);
     }
 
     function onScanSuccess(decodedText) {
-        // Al escanear con éxito, apagamos la cámara de inmediato para liberar el teléfono
-        html5QrCode.stop().then(() => {
-            document.getElementById('start-btn').style.display = 'inline-flex';
-            document.getElementById('camera-holder').style.display = 'none';
-            
-            const guardia = document.getElementById('guardia').value;
-            const ahora = new Date();
-            
-            const nuevoRegistro = {
-                fecha_hora: ahora.toLocaleString('es-AR'),
-                guardia: guardia,
-                punto: decodedText
-            };
+        apagarCamara();
+        
+        const guardia = document.getElementById('guardia').value;
+        const ahora = new Date();
+        
+        const nuevoRegistro = {
+            fecha_hora: ahora.toLocaleString('es-AR'),
+            guardia: guardia,
+            punto: decodedText
+        };
 
-            fetch('/api/fichar', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(nuevoRegistro)
-            })
-            .then(res => res.json())
-            .then(data => {
-                if(data.success) {
-                    mostrarEstado(`<b>Punto Registrado con Éxito</b><br>📍 ${decodedText}<br>🕒 ${nuevoRegistro.fecha_hora}`, "success");
-                } else {
-                    mostrarEstado("❌ Error al procesar en base de datos Orbis.", "error");
-                }
-            })
-            .catch(err => {
-                mostrarEstado("❌ Falla de conectividad con el servidor central.", "error");
-                console.error(err);
-            });
+        fetch('/api/fichar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(nuevoRegistro)
+        })
+        .then(res => res.json())
+        .then(data => {
+            if(data.success) {
+                mostrarEstado(`<b>Punto Registrado con Éxito</b><br>📍 ${decodedText}<br>🕒 ${nuevoRegistro.fecha_hora}`, "success");
+            } else {
+                mostrarEstado("❌ Error al procesar en base de datos Orbis.", "error");
+            }
+        })
+        .catch(err => {
+            mostrarEstado("❌ Falla de conectividad con el servidor central.", "error");
+            console.error(err);
         });
     }
 
     function onScanFailure(error) {
-        // Fallas de cuadro silenciosas mientras busca el QR
+        // Búsqueda silenciosa de códigos QR
     }
 
     function mostrarEstado(mensaje, tipo) {
@@ -523,6 +535,7 @@
         }
     }
 </script>
+
 
 </body>
 </html>
