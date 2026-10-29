@@ -378,7 +378,7 @@
 </div>
 
 <script>
-    let html5QrcodeScanner;
+    let html5QrCode; // Cambiamos a la instancia directa del motor
 
     function switchTab(tab) {
         document.querySelectorAll('.nav-item').forEach(t => t.classList.remove('active'));
@@ -390,6 +390,13 @@
         } else {
             document.getElementById('tab-reportes').classList.add('active');
             document.getElementById('panel-reportes').classList.add('active');
+            // Si cambian de pestaña, apagamos la cámara para liberar el hardware
+            if (html5QrCode && html5QrCode.isScanning) {
+                html5QrCode.stop().then(() => {
+                    document.getElementById('start-btn').style.display = 'inline-flex';
+                    document.getElementById('camera-holder').style.display = 'none';
+                });
+            }
             cargarTabla();
         }
     }
@@ -397,50 +404,67 @@
     function iniciarEscaneo() {
         document.getElementById('start-btn').style.display = 'none';
         document.getElementById('camera-holder').style.display = 'block';
+        document.getElementById('status').style.display = 'none';
         
-        html5QrcodeScanner = new Html5QrcodeScanner("reader", { 
-            fps: 15, 
-            qrbox: { width: 220, height: 220 },
-            rememberLastUsedCamera: true,
-            supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA]
-        }, false);
-        html5QrcodeScanner.render(onScanSuccess, onScanFailure);
-    }
-
-    function onScanSuccess(decodedText) {
-        html5QrcodeScanner.clear();
-        document.getElementById('start-btn').style.display = 'block';
-        document.getElementById('camera-holder').style.display = 'none';
+        // Inicializamos el motor directo sobre el contenedor
+        html5QrCode = new Html5Qrcode("reader");
         
-        const guardia = document.getElementById('guardia').value;
-        const ahora = new Date();
-        
-        const nuevoRegistro = {
-            fecha_hora: ahora.toLocaleString('es-AR'),
-            guardia: guardia,
-            punto: decodedText
-        };
-
-        fetch('/api/fichar', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(nuevoRegistro)
-        })
-        .then(res => res.json())
-        .then(data => {
-            if(data.success) {
-                mostrarEstado(`<b>Punto Registrado con Éxito</b><br>📍 ${decodedText}<br>🕒 ${nuevoRegistro.fecha_hora}`, "success");
-            } else {
-                mostrarEstado("❌ Error al procesar en base de datos Orbis.", "error");
-            }
-        })
-        .catch(err => {
-            mostrarEstado("❌ Falla de conectividad con el servidor central.", "error");
+        // Arrancamos forzando la cámara trasera y pidiendo el permiso de forma nativa
+        html5QrCode.start(
+            { facingMode: "environment" }, // Cámara trasera
+            {
+                fps: 15,
+                qrbox: { width: 220, height: 220 }
+            },
+            onScanSuccess,
+            onScanFailure
+        ).catch(err => {
+            // Si el celular bloquea el inicio, le avisamos al usuario por qué
             console.error(err);
+            mostrarEstado("⚠️ No se pudo acceder a la cámara. Asegúrate de cerrar otras apps que la usen y recargar la página.", "error");
+            document.getElementById('start-btn').style.display = 'inline-flex';
+            document.getElementById('camera-holder').style.display = 'none';
         });
     }
 
-    function onScanFailure(error) {}
+    function onScanSuccess(decodedText) {
+        // Al escanear con éxito, apagamos la cámara de inmediato para liberar el teléfono
+        html5QrCode.stop().then(() => {
+            document.getElementById('start-btn').style.display = 'inline-flex';
+            document.getElementById('camera-holder').style.display = 'none';
+            
+            const guardia = document.getElementById('guardia').value;
+            const ahora = new Date();
+            
+            const nuevoRegistro = {
+                fecha_hora: ahora.toLocaleString('es-AR'),
+                guardia: guardia,
+                punto: decodedText
+            };
+
+            fetch('/api/fichar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(nuevoRegistro)
+            })
+            .then(res => res.json())
+            .then(data => {
+                if(data.success) {
+                    mostrarEstado(`<b>Punto Registrado con Éxito</b><br>📍 ${decodedText}<br>🕒 ${nuevoRegistro.fecha_hora}`, "success");
+                } else {
+                    mostrarEstado("❌ Error al procesar en base de datos Orbis.", "error");
+                }
+            })
+            .catch(err => {
+                mostrarEstado("❌ Falla de conectividad con el servidor central.", "error");
+                console.error(err);
+            });
+        });
+    }
+
+    function onScanFailure(error) {
+        // Fallas de cuadro silenciosas mientras busca el QR
+    }
 
     function mostrarEstado(mensaje, tipo) {
         const s = document.getElementById('status');
@@ -499,6 +523,7 @@
         }
     }
 </script>
+
 </body>
 </html>
 
