@@ -6,11 +6,9 @@ const PORT = process.env.PORT || 3000;
 
 const FILE_PATH = path.join(__dirname, 'registros.json');
 
-// Middleware para entender datos en formato JSON
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// Función auxiliar para leer el archivo JSON de forma segura
 function leerRegistros() {
     try {
         if (!fs.existsSync(FILE_PATH)) return [];
@@ -22,7 +20,6 @@ function leerRegistros() {
     }
 }
 
-// RUTA 1: Recibir una nueva fichada desde el celular del guardia
 app.post('/api/fichar', (req, res) => {
     const nuevoRegistro = req.body;
     if (!nuevoRegistro.guardia || !nuevoRegistro.punto) {
@@ -30,7 +27,7 @@ app.post('/api/fichar', (req, res) => {
     }
 
     const historial = leerRegistros();
-    historial.unshift(nuevoRegistro); // Agregar al principio
+    historial.unshift(nuevoRegistro);
 
     try {
         fs.writeFileSync(FILE_PATH, JSON.stringify(historial, null, 2), 'utf-8');
@@ -41,12 +38,10 @@ app.post('/api/fichar', (req, res) => {
     }
 });
 
-// RUTA 2: Entregar el historial completo para la pestaña de Reportes/Excel
 app.get('/api/historial', (req, res) => {
     res.json(leerRegistros());
 });
 
-// RUTA 3: Borrar el historial
 app.delete('/api/historial', (req, res) => {
     try {
         fs.writeFileSync(FILE_PATH, JSON.stringify([], null, 2), 'utf-8');
@@ -56,8 +51,8 @@ app.delete('/api/historial', (req, res) => {
     }
 });
 
-// Servir la interfaz web principal
-app.get('*', (req, res) => {
+// CORRECCIÓN ABSOLUTA: Se utiliza una ruta válida para versiones modernas de Express/Path-to-RegExp
+app.get('/:catchall*', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
