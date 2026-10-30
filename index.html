@@ -5,8 +5,8 @@
  <meta name="viewport" content="width=device-width, initial-scale=1.0">
  <title>Orbis San Luis - Control de Rondín</title>
  
- <!-- Librería externa para exportar a Excel únicamente -->
- <script src="https://jsdelivr.net"></script>
+ <!-- CORRECCIÓN EXCEL: CDN Oficial y directo de SheetJS sin bloqueos de carga -->
+ <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
  
  <link rel="preconnect" href="https://googleapis.com">
  <link rel="preconnect" href="https://gstatic.com" crossorigin>
@@ -55,7 +55,7 @@
  th, td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--border); }
  th { background-color: var(--background); font-weight: 600; color: var(--text-muted); position: sticky; top: 0; z-index: 10; }
  .nav-bar { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 480px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); border-top: 1px solid var(--border); display: flex; height: 68px; z-index: 100; padding-bottom: env(safe-area-inset-bottom); }
- .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-muted); font-size: 11px; font-weight: 600; cursor: pointer; gap: 4px; }
+ .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-muted); font-size: 11px; font-weight: 600; cursor: pointer; gap: 4px; transition: color 0.2s; }
  .nav-item.active { color: var(--primary); }
  .nav-icon { font-size: 20px; }
  </style>
@@ -133,7 +133,6 @@
  </div>
 </div>
 
-<!-- Lienzo oculto necesario por si el celular usa el motor de respaldo jsQR -->
 <canvas id="canvas-fallback" style="display:none;"></canvas>
 
 <script>
@@ -142,12 +141,10 @@
  let detectorNativo = null;
  let jsQrCargado = false;
 
- // 1. Estrategia híbrida: Intentar usar el decodificador rápido integrado del dispositivo
  if ('BarcodeDetector' in window) {
      detectorNativo = new BarcodeDetector({ formats: ['qr_code'] });
  }
 
- // 2. Carga inteligente en segundo plano: Si el móvil no tiene motor nativo (como iOS), descarga jsQR de forma asíncrona
  function asegurarLibreriaRespaldo() {
      if (detectorNativo || jsQrCargado) return Promise.resolve();
      return new Promise((resolve, reject) => {
@@ -159,8 +156,7 @@
      });
  }
 
- // Disparamos la verificación silenciosa al abrir el sitio para no retrasar la carga estática
- asegurarLibreriaRespaldo().catch(e => console.log("Usando motor nativo."));
+ asegurarLibreriaRespaldo().catch(() => console.log("Usando motor nativo."));
 
  function switchTab(tab) {
  document.querySelectorAll('.nav-item').forEach(t => t.classList.remove('active'));
@@ -188,13 +184,13 @@
    document.getElementById('camera-holder').style.display = 'none';
  }
 
-  async function iniciarEscaneo() {
+ async function iniciarEscaneo() {
  document.getElementById('start-btn').style.display = 'none';
  document.getElementById('camera-holder').style.display = 'block';
  document.getElementById('status').style.display = 'none';
  
  try {
-     await asegurarLibreriaRespaldo(); // Asegura el decodificador antes de encender la cámara
+     await asegurarLibreriaRespaldo();
      const video = document.getElementById('webcam-preview');
 
      navigator.mediaDevices.getUserMedia({
@@ -206,7 +202,6 @@
          bucleEscaneo = requestAnimationFrame(escanearFotograma);
      })
      .catch(err => {
-         // Fallback por si ejecutan en PCs de prueba o dispositivos de cámara única
          navigator.mediaDevices.getUserMedia({ video: true })
          .then(stream => {
              streamCamara = stream;
@@ -224,12 +219,11 @@
  }
  }
 
- function escanearFotograma() {
+  function escanearFotograma() {
      const video = document.getElementById('webcam-preview');
      if (!streamCamara) return;
 
      if (video.readyState === video.HAVE_ENOUGH_DATA) {
-         // SI EL DISPOSITIVO TIENE MOTOR NATIVO (Android Chrome, etc.)
          if (detectorNativo) {
              detectorNativo.detect(video)
              .then(codigos => {
@@ -243,7 +237,6 @@
                  if (streamCamara) bucleEscaneo = requestAnimationFrame(escanearFotograma);
              });
          } 
-         // FALLBACK UNIVERSAL (iPhone Safari, etc. usando procesamiento matricial jsQR)
          else if (jsQrCargado) {
              const canvas = document.getElementById('canvas-fallback');
              const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -251,7 +244,7 @@
              canvas.height = 300;
              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
              
-             const imgData = ctx.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+             const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
              const codigo = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: "dontInvert" });
              
              if (codigo) {
@@ -266,92 +259,92 @@
  }
 
  function onScanSuccess(decodedText) {
- apagarCamara();
- mostrarEstado("⏳ Guardando fichada en Orbis...", "success");
- 
- const guardia = document.getElementById('guardia').value;
- const ahora = new Date();
- 
- const nuevoRegistro = {
- fecha_hora: ahora.toLocaleString('es-AR'),
- guardia: guardia,
- punto: decodedText
- };
+     apagarCamara();
+     mostrarEstado("⏳ Guardando fichada en Orbis...", "success");
+     
+     const guardia = document.getElementById('guardia').value;
+     const ahora = new Date();
+     
+     const nuevoRegistro = {
+         fecha_hora: ahora.toLocaleString('es-AR'),
+         guardia: guardia,
+         punto: decodedText
+     };
 
- fetch('/api/fichar', {
- method: 'POST',
- headers: { 'Content-Type': 'application/json' },
- body: JSON.stringify(nuevoRegistro)
- })
- .then(res => res.json())
- .then(data => {
- if(data.success) {
-  mostrarEstado(`<b>Punto Registrado con Éxito</b><br>📍 ${decodedText}<br>🕒 ${nuevoRegistro.fecha_hora}`, "success");
- } else {
-  mostrarEstado("❌ Error al procesar en la base de datos Orbis.", "error");
- }
- })
- .catch(err => {
-  mostrarEstado("❌ Falla de wiped/conectividad con el servidor.", "error");
-  console.error(err);
- });
+     fetch('/api/fichar', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify(nuevoRegistro)
+     })
+     .then(res => res.json())
+     .then(data => {
+         if(data.success) {
+             mostrarEstado(`<b>Punto Registrado con Éxito</b><br>📍 ${decodedText}<br>🕒 ${nuevoRegistro.fecha_hora}`, "success");
+         } else {
+             mostrarEstado("❌ Error al procesar en la base de datos Orbis.", "error");
+         }
+     })
+     .catch(err => {
+         mostrarEstado("❌ Falla de conectividad con el servidor central.", "error");
+         console.error(err);
+     });
  }
 
  function mostrarEstado(mensaje, tipo) {
- const s = document.getElementById('status');
- s.style.display = 'block';
- s.className = tipo;
- s.innerHTML = mensaje;
+     const s = document.getElementById('status');
+     s.style.display = 'block';
+     s.className = tipo;
+     s.innerHTML = mensaje;
  }
 
  function cargarTabla() {
- const tbody = document.getElementById('tabla-registros');
- tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">Buscando registros...</td></tr>';
- 
- fetch('/api/historial')
- .then(res => res.json())
- .then(historial => {
-  tbody.innerHTML = '';
-  if(historial.length === 0) {
-   tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">No hay marcaciones el día de hoy.</td></tr>';
-   return;
-  }
-  historial.forEach(r => {
-   const tr = document.createElement('tr');
-   tr.innerHTML = `<td>${r.fecha_hora}</td><td><b>${r.guardia}</b></td><td><span style="background:#f1f5f9;padding:4px 8px;border-radius:6px;font-weight:600">${r.punto}</span></td>`;
-   tbody.appendChild(tr);
-  });
- })
- .catch(err => {
-  tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--danger)">Error de conexión al cargar datos.</td></tr>';
- });
+     const tbody = document.getElementById('tabla-registros');
+     tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">Buscando registros...</td></tr>';
+     
+     fetch('/api/historial')
+     .then(res => res.json())
+     .then(historial => {
+         tbody.innerHTML = '';
+         if(historial.length === 0) {
+             tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">No hay marcaciones el día de hoy.</td></tr>';
+             return;
+         }
+         historial.forEach(r => {
+             const tr = document.createElement('tr');
+             tr.innerHTML = `<td>${r.fecha_hora}</td><td><b>${r.guardia}</b></td><td><span style="background:#f1f5f9;padding:4px 8px;border-radius:6px;font-weight:600">${r.punto}</span></td>`;
+             tbody.appendChild(tr);
+         });
+     })
+     .catch(err => {
+         tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--danger)">Error de conexión al cargar datos.</td></tr>';
+     });
  }
 
  function exportarExcel() {
- fetch('/api/historial')
- .then(res => res.json())
- .then(historial => {
-  if(historial.length === 0) {
-   alert("No existen datos para generar el reporte unificado.");
-   return;
-  }
-  const datosFormateados = historial.map(r => ({
-   "Fecha y Hora": r.fecha_hora,
-   "Personal de Guardia": r.guardia,
-   "Puesto de Control": r.punto
-  }));
-  const hoja = XLSX.utils.json_to_sheet(datosFormateados);
-  const libro = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(libro, hoja, "Rondines_Orbis");
-  XLSX.writeFile(libro, `Reporte_Orbis_SanLuis_${new Date().toISOString().slice(0,10)}.xlsx`);
- });
+     fetch('/api/historial')
+     .then(res => res.json())
+     .then(historial => {
+         if(historial.length === 0) {
+             alert("No existen datos para generar el reporte unificado.");
+             return;
+         }
+         const datosFormateados = historial.map(r => ({
+             "Fecha y Hora": r.fecha_hora,
+             "Personal de Guardia": r.guardia,
+             "Puesto de Control": r.punto
+         }));
+         const hoja = XLSX.utils.json_to_sheet(datosFormateados);
+         const libro = XLSX.utils.book_new();
+         XLSX.utils.book_append_sheet(libro, hoja, "Rondines_Orbis");
+         XLSX.writeFile(libro, `Reporte_Orbis_SanLuis_${new Date().toISOString().slice(0,10)}.xlsx`);
+     });
  }
 
  function borrarHistorial() {
- if(confirm("¿Está seguro de purgar el historial general de Orbis San Luis? Esta acción no se puede deshacer.")) {
-  fetch('/api/historial', { method: 'DELETE' })
-  .then(() => cargarTabla());
- }
+     if(confirm("¿Está seguro de purgar el historial general de Orbis San Luis? Esta acción no se puede deshacer.")) {
+         fetch('/api/historial', { method: 'DELETE' })
+         .then(() => cargarTabla());
+     }
  }
 </script>
 </body>
