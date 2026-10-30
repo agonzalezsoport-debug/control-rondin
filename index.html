@@ -1,53 +1,537 @@
-function cargarTabla() {
- const tbody = document.getElementById('tabla-registros');
- tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">Buscando registros...</td></tr>';
- 
- fetch('/api/historial')
- .then(res => res.json())
- .then(historial => {
- tbody.innerHTML = '';
- if(historial.length === 0) {
-  tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">No hay marcaciones el día de hoy.</td></tr>';
-  return;
- }
- historial.forEach(r => {
-  const tr = document.createElement('tr');
-  tr.innerHTML = `<td>${r.fecha_hora}</td><td><b>${r.guardia}</b></td><td><span style="background:#f1f5f9;padding:4px 8px;border-radius:6px;font-weight:600">${r.punto}</span></td>`;
-  tbody.appendChild(tr);
- });
- })
- .catch(err => {
- tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--danger)">Error de conexión al cargar datos.</td></tr>';
- });
- }
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orbis San Luis - Control de Rondín</title>
+    <!-- Librerías de escaneo y exportación -->
+    <script src="https://unpkg.com" type="text/javascript"></script>
+    <script src="https://cloudflare.com"></script>
+    <!-- Google Fonts para un diseño tipográfico premium -->
+    <link rel="preconnect" href="https://googleapis.com">
+    <link rel="preconnect" href="https://gstatic.com" crossorigin>
+    <link href="https://googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #1e3a8a; /* Azul Corporativo Orbis */
+            --primary-light: #3b82f6;
+            --success: #10b981;
+            --danger: #ef4444;
+            --background: #f8fafc;
+            --surface: #ffffff;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --radius: 16px;
+        }
 
- function exportarExcel() {
- fetch('/api/historial')
- .then(res => res.json())
- .then(historial => {
- if(historial.length === 0) {
-  alert("No existen datos para generar el reporte unificado.");
-  return;
- }
- const datosFormateados = historial.map(r => ({
-  "Fecha y Hora": r.fecha_hora,
-  "Personal de Guardia": r.guardia,
-  "Puesto de Control": r.punto
- }));
- const hoja = XLSX.utils.json_to_sheet(datosFormateados);
- const libro = XLSX.utils.book_new();
- XLSX.utils.book_append_sheet(libro, hoja, "Rondines_Orbis");
- XLSX.writeFile(libro, `Reporte_Orbis_SanLuis_${new Date().toISOString().slice(0,10)}.xlsx`);
- });
- }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
 
- function borrarHistorial() {
- if(confirm("¿Está seguro de purgar el historial general de Orbis San Luis? Esta acción no se puede deshacer.")) {
- fetch('/api/historial', { method: 'DELETE' })
- .then(() => cargarTabla());
- }
- }
+        body {
+            background-color: var(--background);
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            min-height: 100vh;
+            padding-bottom: 80px; /* Espacio para la barra de navegación móvil */
+        }
+
+        .app-container {
+            width: 100%;
+            max-width: 480px;
+            background: var(--surface);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05);
+        }
+
+        /* Encabezado Profesional */
+        .header {
+            background: linear-gradient(135deg, var(--primary) 0%, #0f172a 100%);
+            color: white;
+            padding: 30px 20px 25px 20px;
+            text-align: center;
+            border-bottom-left-radius: 24px;
+            border-bottom-right-radius: 24px;
+            box-shadow: 0 4px 20px rgba(30, 58, 138, 0.15);
+        }
+
+        .header h1 {
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            margin-bottom: 4px;
+        }
+
+        .header p {
+            font-size: 13px;
+            color: #93c5fd;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .content {
+            padding: 24px 20px;
+            flex: 1;
+        }
+
+        .panel {
+            display: none;
+            animation: fadeIn 0.3s ease-in-out;
+        }
+
+        .panel.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Formularios y Selectores */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+        }
+
+        .form-group {
+            margin-bottom: 0px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .select-wrapper {
+            position: relative;
+        }
+
+        select {
+            width: 100%;
+            padding: 14px 16px;
+            font-size: 15px;
+            font-weight: 500;
+            color: var(--text-main);
+            background-color: var(--background);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            appearance: none;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        select:focus {
+            border-color: var(--primary-light);
+            background-color: var(--surface);
+            box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+        }
+
+        /* Área de la Cámara */
+        .camera-box {
+            background: #0f172a;
+            border-radius: var(--radius);
+            overflow: hidden;
+            position: relative;
+            margin-top: 20px;
+            aspect-ratio: 1;
+            border: 2px solid var(--border);
+        }
+
+        #reader {
+            width: 100% !important;
+            border: none !important;
+        }
+
+        #reader __video {
+            object-fit: cover !important;
+        }
+
+        /* Botones Estilizados */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            padding: 16px;
+            font-size: 15px;
+            font-weight: 600;
+            border-radius: 12px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background-color: var(--primary);
+            color: white;
+            box-shadow: 0 4px 12px rgba(30, 58, 138, 0.2);
+        }
+
+        .btn-primary:active {
+            transform: scale(0.98);
+        }
+
+        .btn-success {
+            background-color: var(--success);
+            color: white;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+        }
+
+        .btn-danger-outline {
+            background-color: transparent;
+            color: var(--danger);
+            border: 1px solid var(--border);
+            margin-top: 25px;
+        }
+
+        /* Estados y Alertas */
+        #status {
+            margin-top: 20px;
+            padding: 16px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 500;
+            line-height: 1.5;
+            display: none;
+            text-align: center;
+            animation: pulse 1.5s infinite alternate;
+        }
+
+        .success { background-color: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+        .error { background-color: #fef2f2; color: #991b1b; border: 1px solid #fca5a5; }
+
+        /* Historial y Tablas */
+        .history-title {
+            font-size: 16px;
+            font-weight: 700;
+            margin: 15px 0 10px 0;
+            color: var(--text-main);
+        }
+
+        .table-container {
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            background: var(--surface);
+            max-height: 320px;
+            overflow-y: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        th, td {
+            padding: 12px 14px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background-color: var(--background);
+            font-weight: 600;
+            color: var(--text-muted);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* Barra de Navegación Inferior (Estilo App) */
+        .nav-bar {
+            position: fixed;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100%;
+            max-width: 480px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-top: 1px solid var(--border);
+            display: flex;
+            height: 68px;
+            z-index: 100;
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+        .nav-item {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            gap: 4px;
+            transition: color 0.2s;
+        }
+
+        .nav-item.active {
+            color: var(--primary);
+        }
+
+        .nav-icon {
+            font-size: 20px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <!-- Encabezado Corporativo -->
+    <div class="header">
+        <h1>Orbis San Luis</h1>
+        <p>Control de Rondín y Vigilancia</p>
+    </div>
+    
+    <div class="content">
+        <!-- PANEL DE ESCANEO -->
+        <div id="panel-escaner" class="panel active">
+            <div class="card">
+                <div class="form-group">
+                    <label for="guardia">Guardia en Turno</label>
+                    <div class="select-wrapper">
+                        <select id="guardia">
+                            <option value="Juan Pérez">Juan Pérez</option>
+                            <option value="Carlos Gómez">Carlos Gómez</option>
+                            <option value="Luis Rodríguez">Luis Rodríguez</option>
+                            <option value="Sistemas Orbis">Sistemas Orbis</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            
+            <button class="btn btn-primary" id="start-btn" onclick="iniciarEscaneo()">
+                <span>📷</span> Activar Escáner de Puesto
+            </button>
+
+            <div id="camera-holder" style="display:none;">
+                <div class="camera-box">
+                    <div id="reader"></div>
+                </div>
+            </div>
+            
+            <div id="status"></div>
+        </div>
+
+        <!-- PANEL DE REPORTES -->
+        <div id="panel-reportes" class="panel">
+            <button class="btn btn-success" onclick="exportarExcel()">
+                 📥 Exportar Planilla a Excel
+            </button>
+            
+            <h3 class="history-title">Registros del Día</h3>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Fecha/Hora</th>
+                            <th>Personal</th>
+                            <th>Punto Control</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabla-registros"></tbody>
+                </table>
+            </div>
+            <button class="btn btn-danger-outline" onclick="borrarHistorial()">
+                <span>⚠️</span> Reiniciar Historial General
+            </button>
+        </div>
+    </div>
+
+    <div class="nav-bar">
+        <div class="nav-item active" id="tab-escaner" onclick="switchTab('escaner')">
+            <span class="nav-icon">📷</span>
+            <span>Escanear QR</span>
+        </div>
+        <div class="nav-item" id="tab-reportes" onclick="switchTab('reportes')">
+            <span class="nav-icon">📊</span>
+            <span>Reportes</span>
+        </div>
+    </div>
+</div>
+
+<script>
+    let html5QrCode = null;
+
+    function switchTab(tab) {
+        document.querySelectorAll('.nav-item').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+        
+        if(tab === 'escaner') {
+            document.getElementById('tab-escaner').classList.add('active');
+            document.getElementById('panel-escaner').classList.add('active');
+        } else {
+            document.getElementById('tab-reportes').classList.add('active');
+            document.getElementById('panel-reportes').classList.add('active');
+            apagarCamara();
+            cargarTabla();
+        }
+    }
+
+    function apagarCamara() {
+        if (html5QrCode && html5QrCode.isScanning) {
+            html5QrCode.stop().then(() => {
+                document.getElementById('start-btn').style.display = 'inline-flex';
+                document.getElementById('camera-holder').style.display = 'none';
+            }).catch(err => console.error("Error al detener:", err));
+        }
+    }
+
+    function iniciarEscaneo() {
+        document.getElementById('start-btn').style.display = 'none';
+        document.getElementById('camera-holder').style.display = 'block';
+        document.getElementById('status').style.display = 'none';
+        
+        setTimeout(() => {
+            try {
+                if (!html5QrCode) {
+                    html5QrCode = new Html5Qrcode("reader");
+                }
+                
+                // OPTIMIZACIÓN: Parámetros simplificados y fluidos para forzar la inicialización nativa
+                html5QrCode.start(
+                    { facingMode: "environment" }, // Prioriza estrictamente la cámara trasera
+                    {
+                        fps: 10,
+                        qrbox: (width, height) => {
+                            const size = Math.floor(Math.min(width, height) * 0.65);
+                            return { width: size, height: size };
+                        },
+                        // Evita que la librería use configuraciones que congelan pantallas en Android
+                        aspectRatio: 1.0
+                    },
+                    onScanSuccess,
+                    onScanFailure
+                ).catch(err => {
+                    console.error("Error directo de cámara:", err);
+                    // Si falla, intentamos un segundo inicio con el método de fallback básico por si el celular es antiguo
+                    html5QrCode.start({ facingMode: "user" }, { fps: 10, qrbox: 250 }, onScanSuccess, onScanFailure)
+                    .catch(e => {
+                        mostrarEstado("⚠️ El sistema operativo de tu celular bloqueó el inicio de la cámara. Por favor, verifica los permisos de la aplicación Chrome en los Ajustes de tu teléfono.", "error");
+                        document.getElementById('start-btn').style.display = 'inline-flex';
+                        document.getElementById('camera-holder').style.display = 'none';
+                    });
+                });
+            } catch (e) {
+                console.error("Error de inicialización:", e);
+            }
+        }, 200);
+    }
+
+    function onScanSuccess(decodedText) {
+        apagarCamara();
+        
+        const guardia = document.getElementById('guardia').value;
+        const ahora = new Date();
+        
+        const nuevoRegistro = {
+            fecha_hora: ahora.toLocaleString('es-AR'),
+            guardia: guardia,
+            punto: decodedText
+        };
+
+        fetch('/api/fichar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(nuevoRegistro)
+        })
+        .then(res => res.json())
+        .then(data => {
+            if(data.success) {
+                mostrarEstado(`<b>Punto Registrado con Éxito</b><br>📍 ${decodedText}<br>🕒 ${nuevoRegistro.fecha_hora}`, "success");
+            } else {
+                mostrarEstado("❌ Error al procesar en base de datos Orbis.", "error");
+            }
+        })
+        .catch(err => {
+            mostrarEstado("❌ Falla de conectividad con el servidor central.", "error");
+            console.error(err);
+        });
+    }
+
+    function onScanFailure(error) {}
+
+    function mostrarEstado(mensaje, tipo) {
+        const s = document.getElementById('status');
+        s.style.display = 'block';
+        s.className = tipo;
+        s.innerHTML = mensaje;
+    }
+
+    function cargarTabla() {
+        const tbody = document.getElementById('tabla-registros');
+        tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">Buscando registros...</td></tr>';
+        
+        fetch('/api/historial')
+        .then(res => res.json())
+        .then(historial => {
+            tbody.innerHTML = '';
+            if(historial.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">No hay marcaciones el día de hoy.</td></tr>';
+                return;
+            }
+            historial.forEach(r => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td>${r.fecha_hora}</td><td><b>${r.guardia}</b></td><td><span style="background:#f1f5f9;padding:4px 8px;border-radius:6px;font-weight:600">${r.punto}</span></td>`;
+                tbody.appendChild(tr);
+            });
+        })
+        .catch(err => {
+            tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--danger)">Error de conexión al cargar datos.</td></tr>';
+        });
+    }
+
+    function exportarExcel() {
+        fetch('/api/historial')
+        .then(res => res.json())
+        .then(historial => {
+            if(historial.length === 0) {
+                alert("No existen datos para generar el reporte unificado.");
+                return;
+            }
+            const datosFormateados = historial.map(r => ({
+                "Fecha y Hora": r.fecha_hora,
+                "Personal de Guardia": r.guardia,
+                "Puesto de Control": r.punto
+            }));
+            const hoja = XLSX.utils.json_to_sheet(datosFormateados);
+            const libro = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(libro, hoja, "Rondines_Orbis");
+            XLSX.writeFile(libro, `Reporte_Orbis_SanLuis_${new Date().toISOString().slice(0,10)}.xlsx`);
+        });
+    }
+
+    function borrarHistorial() {
+        if(confirm("¿Está seguro de purgar el historial general de Orbis San Luis? Esta acción no se puede deshacer.")) {
+            fetch('/api/historial', { method: 'DELETE' })
+            .then(() => cargarTabla());
+        }
+    }
 </script>
-</body>
-</html>
-
