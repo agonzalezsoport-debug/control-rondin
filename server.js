@@ -1,57 +1,56 @@
 const express = require('express');
 const path = require('path');
-const fs = require('fs');
+const { kv } = require('@vercel/kv'); // Base de datos en la nube integrada
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-const FILE_PATH = path.join(__dirname, 'registros.json');
 
 app.use(express.json());
 app.use(express.static(__dirname));
 
-function leerRegistros() {
+// Función para leer registros desde la nube de forma asincrónica
+async function leerRegistros() {
     try {
-        if (!fs.existsSync(FILE_PATH)) return [];
-        const contenido = fs.readFileSync(FILE_PATH, 'utf-8');
-        return contenido ? JSON.parse(contenido) : [];
+        const registros = await kv.get('registros_orbis');
+        return registros || [];
     } catch (error) {
-        console.error("Error al leer el archivo de registros:", error);
+        console.error("Error al leer de Vercel KV:", error);
         return [];
     }
 }
 
-app.post('/api/fichar', (req, res) => {
+app.post('/api/fichar', async (req, res) => {
     const nuevoRegistro = req.body;
     if (!nuevoRegistro.guardia || !nuevoRegistro.punto) {
         return res.status(400).json({ error: "Datos incompletos" });
     }
 
-    const historial = leerRegistros();
+    const historial = await leerRegistros();
     historial.unshift(nuevoRegistro);
 
     try {
-        fs.writeFileSync(FILE_PATH, JSON.stringify(historial, null, 2), 'utf-8');
-        return res.json({ success: true, mensaje: "Fichada guardada en el servidor" });
+        // Guarda en la nube de forma permanente
+        await kv.set('registros_orbis', historial);
+        return res.json({ success: true, mensaje: "Fichada guardada en la nube" });
     } catch (error) {
-        console.error("Error al escribir el archivo de registros:", error);
+        console.error("Error al escribir en Vercel KV:", error);
         return res.status(500).json({ error: "Error interno al guardar" });
     }
 });
 
-app.get('/api/historial', (req, res) => {
-    res.json(leerRegistros());
+app.get('/api/historial', async (req, res) => {
+    const historial = await leerRegistros();
+    res.json(historial);
 });
 
-app.delete('/api/historial', (req, res) => {
+app.delete('/api/historial', async (req, res) => {
     try {
-        fs.writeFileSync(FILE_PATH, JSON.stringify([], null, 2), 'utf-8');
+        await kv.set('registros_orbis', []);
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: "No se pudo borrar el historial" });
     }
 });
 
-// CORRECCIÓN ABSOLUTA: Se utiliza una ruta válida para versiones modernas de Express/Path-to-RegExp
 app.get('/:catchall*', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
