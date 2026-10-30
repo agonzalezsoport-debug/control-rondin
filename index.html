@@ -140,7 +140,6 @@
 
 <!-- Elemento oculto en segundo plano para procesar la lectura de la imagen -->
 <canvas id="hidden-canvas" style="display:none;"></canvas>
-
 <script>
     let html5QrcodeScanner;
 
@@ -154,6 +153,9 @@
         } else {
             document.getElementById('tab-reportes').classList.add('active');
             document.getElementById('panel-reportes').classList.add('active');
+            
+            // Si cambian de pestaña, apagamos la cámara de inmediato para liberar RAM
+            detenerCamaraFormanual();
             cargarTabla();
         }
     }
@@ -162,20 +164,32 @@
         document.getElementById('start-btn').style.display = 'none';
         document.getElementById('camera-holder').style.display = 'block';
         
+        // OPTIMIZACIÓN 1: Bajamos FPS a 8 (más que suficiente para leer QR rápido) 
+        // y deshabilitamos el procesamiento repetitivo innecesario.
         html5QrcodeScanner = new Html5QrcodeScanner("reader", { 
-            fps: 15, 
-            qrbox: { width: 220, height: 220 },
+            fps: 8, 
+            qrbox: { width: 250, height: 250 },
             rememberLastUsedCamera: true,
-            supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA]
+            supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
+            aspectRatio: 1.0 // Fuerza una relación cuadrada nativa más liviana
         }, false);
+        
         html5QrcodeScanner.render(onScanSuccess, onScanFailure);
     }
 
     function onScanSuccess(decodedText) {
-        html5QrcodeScanner.clear();
-        document.getElementById('start-btn').style.display = 'block';
-        document.getElementById('camera-holder').style.display = 'none';
+        // OPTIMIZACIÓN 2: Detener de inmediato el escáner ANTES de hacer el fetch
+        // Esto apaga la cámara y libera los recursos del procesador para la petición de red
+        if (html5QrcodeScanner) {
+            html5QrcodeScanner.clear().then(() => {
+                document.getElementById('start-btn').style.display = 'block';
+                document.getElementById('camera-holder').style.display = 'none';
+            }).catch(err => console.error("Error al limpiar escaner:", err));
+        }
         
+        // Mostrar estado de carga instantáneo al usuario
+        mostrarEstado("⚡ Procesando punto de control...", "success");
+
         const guardia = document.getElementById('guardia').value;
         const ahora = new Date();
         
@@ -204,7 +218,18 @@
         });
     }
 
-    function onScanFailure(error) {}
+    // OPTIMIZACIÓN 3: Evitar el bucle infinito de logs en consola bloqueantes
+    function onScanFailure(error) {
+        // Dejar vacío para que no sature la consola del navegador del teléfono cada 100ms
+    }
+
+    function detenerCamaraFormanual() {
+        if (html5QrcodeScanner && html5QrcodeScanner.getState() === 2) { // 2 significa ESCANEANDO
+            html5QrcodeScanner.clear();
+            document.getElementById('start-btn').style.display = 'block';
+            document.getElementById('camera-holder').style.display = 'none';
+        }
+    }
 
     function mostrarEstado(mensaje, tipo) {
         const s = document.getElementById('status');
@@ -263,7 +288,5 @@
         }
     }
 </script>
-</body>
-</html>
 
 
