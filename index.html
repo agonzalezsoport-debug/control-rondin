@@ -5,7 +5,7 @@
  <meta name="viewport" content="width=device-width, initial-scale=1.0">
  <title>Orbis San Luis - Control de Rondín</title>
  
- <!-- Única librería externa ultra liviana solo para el reporte Excel -->
+ <!-- Librería externa para exportar a Excel únicamente -->
  <script src="https://jsdelivr.net"></script>
  
  <link rel="preconnect" href="https://googleapis.com">
@@ -39,7 +39,7 @@
  select { width: 100%; padding: 14px 16px; font-size: 15px; font-weight: 500; color: var(--text-main); background-color: var(--background); border: 1px solid var(--border); border-radius: 12px; appearance: none; outline: none; }
  
  .camera-box { background: #0f172a; border-radius: var(--radius); overflow: hidden; position: relative; margin-top: 20px; aspect-ratio: 1; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; }
- #webcam-preview { width: 100%; height: 100%; object-fit: cover; transform: scaleX(1); }
+ #webcam-preview { width: 100%; height: 100%; object-fit: cover; }
  
  .btn { display: inline-flex; align-items: center; justify-content: center; width: 100%; padding: 16px; font-size: 15px; font-weight: 600; border-radius: 12px; border: none; cursor: pointer; transition: all 0.2s; gap: 8px; }
  .btn-primary { background-color: var(--primary); color: white; box-shadow: 0 4px 12px rgba(30, 58, 138, 0.2); }
@@ -133,15 +133,34 @@
  </div>
 </div>
 
+<!-- Lienzo oculto necesario por si el celular usa el motor de respaldo jsQR -->
+<canvas id="canvas-fallback" style="display:none;"></canvas>
+
 <script>
  let streamCamara = null;
  let bucleEscaneo = null;
- let detectorQR = null;
+ let detectorNativo = null;
+ let jsQrCargado = false;
 
- // Verificamos si el navegador móvil soporta el escáner nativo ultra rápido
+ // 1. Estrategia híbrida: Intentar usar el decodificador rápido integrado del dispositivo
  if ('BarcodeDetector' in window) {
-     detectorQR = new BarcodeDetector({ formats: ['qr_code'] });
+     detectorNativo = new BarcodeDetector({ formats: ['qr_code'] });
  }
+
+ // 2. Carga inteligente en segundo plano: Si el móvil no tiene motor nativo (como iOS), descarga jsQR de forma asíncrona
+ function asegurarLibreriaRespaldo() {
+     if (detectorNativo || jsQrCargado) return Promise.resolve();
+     return new Promise((resolve, reject) => {
+         const script = document.createElement('script');
+         script.src = "https://jsdelivr.net";
+         script.onload = () => { jsQrCargado = true; resolve(); };
+         script.onerror = () => reject(new Error("Falla al descargar decodificador de respaldo"));
+         document.head.appendChild(script);
+     });
+ }
+
+ // Disparamos la verificación silenciosa al abrir el sitio para no retrasar la carga estática
+ asegurarLibreriaRespaldo().catch(e => console.log("Usando motor nativo."));
 
  function switchTab(tab) {
  document.querySelectorAll('.nav-item').forEach(t => t.classList.remove('active'));
@@ -159,60 +178,88 @@
  }
 
  function apagarCamara() {
-   cancelAnimationFrame(bucleEscaneo);
+   if (bucleEscaneo) cancelAnimationFrame(bucleEscaneo);
    if (streamCamara) {
      streamCamara.getTracks().forEach(track => track.stop());
    }
+   streamCamara = null;
+   bucleEscaneo = null;
    document.getElementById('start-btn').style.display = 'inline-flex';
    document.getElementById('camera-holder').style.display = 'none';
  }
 
- function iniciarEscaneo() {
+  async function iniciarEscaneo() {
  document.getElementById('start-btn').style.display = 'none';
  document.getElementById('camera-holder').style.display = 'block';
  document.getElementById('status').style.display = 'none';
  
- const video = document.getElementById('webcam-preview');
+ try {
+     await asegurarLibreriaRespaldo(); // Asegura el decodificador antes de encender la cámara
+     const video = document.getElementById('webcam-preview');
 
- // Encendemos el hardware de la cámara trasera al instante sin intermediarios
- navigator.mediaDevices.getUserMedia({
-     video: { facingMode: { exact: "environment" } }
- })
- .then(stream => {
-     streamCamara = stream;
-     video.srcObject = stream;
-     bucleEscaneo = requestAnimationFrame(escanearFotograma);
- })
- .catch(err => {
-     // Fallback por si están testeando en PC o celulares viejos sin múltiples cámaras
-     navigator.mediaDevices.getUserMedia({ video: true })
+     navigator.mediaDevices.getUserMedia({
+         video: { facingMode: { exact: "environment" } }
+     })
      .then(stream => {
          streamCamara = stream;
          video.srcObject = stream;
          bucleEscaneo = requestAnimationFrame(escanearFotograma);
      })
-     .catch(e => {
-         mostrarEstado("❌ Error de permisos. Habilitá la cámara en los ajustes de tu Chrome.", "error");
-         apagarCamara();
+     .catch(err => {
+         // Fallback por si ejecutan en PCs de prueba o dispositivos de cámara única
+         navigator.mediaDevices.getUserMedia({ video: true })
+         .then(stream => {
+             streamCamara = stream;
+             video.srcObject = stream;
+             bucleEscaneo = requestAnimationFrame(escanearFotograma);
+         })
+         .catch(e => {
+             mostrarEstado("❌ Acceso denegado. Habilitá los permisos de cámara en tu navegador.", "error");
+             apagarCamara();
+         });
      });
- });
+ } catch(err) {
+     mostrarEstado("❌ El sistema de lectura está iniciando. Esperá 2 segundos e intentá de nuevo.", "error");
+     apagarCamara();
+ }
  }
 
  function escanearFotograma() {
      const video = document.getElementById('webcam-preview');
-     
-     if (video.readyState === video.HAVE_ENOUGH_DATA && detectorQR) {
-         detectorQR.detect(video)
-         .then(codigos => {
-             if (codigos.length > 0) {
-                 onScanSuccess(codigos[0].rawValue);
+     if (!streamCamara) return;
+
+     if (video.readyState === video.HAVE_ENOUGH_DATA) {
+         // SI EL DISPOSITIVO TIENE MOTOR NATIVO (Android Chrome, etc.)
+         if (detectorNativo) {
+             detectorNativo.detect(video)
+             .then(codigos => {
+                 if (codigos.length > 0 && codigos[0].rawValue) {
+                     onScanSuccess(codigos[0].rawValue);
+                     return;
+                 }
+                 if (streamCamara) bucleEscaneo = requestAnimationFrame(escanearFotograma);
+             })
+             .catch(() => {
+                 if (streamCamara) bucleEscaneo = requestAnimationFrame(escanearFotograma);
+             });
+         } 
+         // FALLBACK UNIVERSAL (iPhone Safari, etc. usando procesamiento matricial jsQR)
+         else if (jsQrCargado) {
+             const canvas = document.getElementById('canvas-fallback');
+             const ctx = canvas.getContext('2d', { willReadFrequently: true });
+             canvas.width = 300;
+             canvas.height = 300;
+             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+             
+             const imgData = ctx.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+             const codigo = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: "dontInvert" });
+             
+             if (codigo) {
+                 onScanSuccess(codigo.data);
                  return;
              }
              if (streamCamara) bucleEscaneo = requestAnimationFrame(escanearFotograma);
-         })
-         .catch(err => {
-             if (streamCamara) bucleEscaneo = requestAnimationFrame(escanearFotograma);
-         });
+         }
      } else {
          if (streamCamara) bucleEscaneo = requestAnimationFrame(escanearFotograma);
      }
@@ -220,7 +267,7 @@
 
  function onScanSuccess(decodedText) {
  apagarCamara();
- mostrarEstado("⏳ Guardando fichada...", "success");
+ mostrarEstado("⏳ Guardando fichada en Orbis...", "success");
  
  const guardia = document.getElementById('guardia').value;
  const ahora = new Date();
@@ -245,7 +292,7 @@
  }
  })
  .catch(err => {
-  mostrarEstado("❌ Falla de conectividad con el servidor central.", "error");
+  mostrarEstado("❌ Falla de wiped/conectividad con el servidor.", "error");
   console.error(err);
  });
  }
@@ -309,3 +356,4 @@
 </script>
 </body>
 </html>
+
