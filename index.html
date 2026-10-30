@@ -5,13 +5,13 @@
  <meta name="viewport" content="width=device-width, initial-scale=1.0">
  <title>Orbis San Luis - Control de Rondín</title>
  
- <!-- CORRECCIÓN CRÍTICA: Enlaces fijos y directos para que cargue al instante sin bloquearse -->
+ <!-- ENLACES DIRECTOS REPARADOS: Carga inmediata sin congelar el navegador -->
  <script src="https://jsdelivr.net"></script>
  <script src="https://jsdelivr.net"></script>
  
- <link rel="preconnect" href="https://googleapis.com">
- <link rel="preconnect" href="https://gstatic.com" crossorigin>
- <link href="https://googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+ <link rel="preconnect" href="https://fonts.googleapis.com">
+ <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+ <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
  <style>
  :root {
  --primary: #1e3a8a;
@@ -39,12 +39,11 @@
  label { display: block; margin-bottom: 8px; font-size: 14px; font-weight: 600; color: var(--text-main); }
  select { width: 100%; padding: 14px 16px; font-size: 15px; font-weight: 500; color: var(--text-main); background-color: var(--background); border: 1px solid var(--border); border-radius: 12px; appearance: none; outline: none; }
  
- .camera-box { background: #0f172a; border-radius: var(--radius); overflow: hidden; position: relative; margin-top: 20px; aspect-ratio: 1; border: 2px solid var(--border); }
- #reader { width: 100% !important; border: none !important; }
- #reader video { object-fit: cover !important; }
+ .camera-trigger { display: flex; align-items: center; justify-content: center; width: 100%; padding: 18px; font-size: 16px; font-weight: 700; border-radius: 12px; border: none; cursor: pointer; background-color: var(--primary); color: white; box-shadow: 0 4px 12px rgba(30, 58, 138, 0.2); gap: 10px; text-align: center; }
+ .camera-trigger:active { transform: scale(0.98); }
+ #qr-file-input { display: none; }
  
  .btn { display: inline-flex; align-items: center; justify-content: center; width: 100%; padding: 16px; font-size: 15px; font-weight: 600; border-radius: 12px; border: none; cursor: pointer; transition: all 0.2s; gap: 8px; }
- .btn-primary { background-color: var(--primary); color: white; box-shadow: 0 4px 12px rgba(30, 58, 138, 0.2); }
  .btn-success { background-color: var(--success); color: white; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2); }
  .btn-danger-outline { background-color: transparent; color: var(--danger); border: 1px solid var(--border); margin-top: 25px; }
  #status { margin-top: 20px; padding: 16px; border-radius: 12px; font-size: 14px; font-weight: 500; line-height: 1.5; display: none; text-align: center; }
@@ -75,24 +74,19 @@
  <div class="form-group">
  <label for="guardia">Guardia en Turno</label>
  <select id="guardia">
-  <option value="Juan Pérez">Juan Pérez</option>
-  <option value="Carlos Gómez">Carlos Gómez</option>
-  <option value="Luis Rodríguez">Luis Rodríguez</option>
-  <option value="Sistemas Orbis">Sistemas Orbis</option>
+ <option value="Juan Pérez">Juan Pérez</option>
+ <option value="Carlos Gómez">Carlos Gómez</option>
+ <option value="Luis Rodríguez">Luis Rodríguez</option>
+ <option value="Sistemas Orbis">Sistemas Orbis</option>
  </select>
  </div>
  </div>
  
- <button class="btn btn-primary" id="start-btn" onclick="iniciarEscaneo()">
-  Activar Escáner en Vivo 📷
- </button>
-
- <div id="camera-holder" style="display:none;">
-  <div class="camera-box">
-   <div id="reader"></div>
-  </div>
- </div>
- 
+ <!-- INTEGRACIÓN NATIVA: Respuesta inmediata en un clic -->
+ <label for="qr-file-input" class="camera-trigger">
+  Escanear Código QR 📷
+ </label>
+ <input type="file" id="qr-file-input" accept="image/*" capture="environment" onchange="procesarCaptura(this)">
  <div id="status"></div>
  </div>
 
@@ -133,9 +127,9 @@
  </div>
 </div>
 
-<script>
- let html5QrCode = null;
+<canvas id="hidden-canvas" style="display:none;"></canvas>
 
+<script>
  function switchTab(tab) {
  document.querySelectorAll('.nav-item').forEach(t => t.classList.remove('active'));
  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
@@ -146,72 +140,57 @@
  } else {
  document.getElementById('tab-reportes').classList.add('active');
  document.getElementById('panel-reportes').classList.add('active');
- apagarCamara();
  cargarTabla();
  }
  }
 
- function apagarCamara() {
- if (html5QrCode && html5QrCode.isScanning) {
- html5QrCode.stop().then(() => {
- document.getElementById('start-btn').style.display = 'inline-flex';
- document.getElementById('camera-holder').style.display = 'none';
- }).catch(err => console.error("Error al detener:", err));
- }
- }
-
- function iniciarEscaneo() {
- document.getElementById('start-btn').style.display = 'none';
- document.getElementById('camera-holder').style.display = 'block';
- document.getElementById('status').style.display = 'none';
+ function procesarCaptura(input) {
+ if (!input.files || !input.files[0]) return;
  
- setTimeout(() => {
- try {
- if (!html5QrCode) {
-  html5QrCode = new Html5Qrcode("reader");
- }
+ mostrarEstado("🔍 Analizando código QR de Orbis...", "success");
  
- html5QrCode.start(
-  { facingMode: "environment" }, 
-  {
-   fps: 8, // Optimizado para que no congele el teléfono
-   qrbox: (width, height) => {
-    const size = Math.floor(Math.min(width, height) * 0.7);
-    return { width: size, height: size };
-   },
-   aspectRatio: 1.0
-  },
-  onScanSuccess,
-  onScanFailure
- ).catch(err => {
-  console.error("Error de cámara, reintentando...", err);
-  // Fallback por si falla el primer intento en ciertos navegadores
-  html5QrCode.start({ facingMode: "user" }, { fps: 8, qrbox: 250 }, onScanSuccess, onScanFailure)
-  .catch(e => {
-   mostrarEstado("❌ No se pudo acceder a la cámara. Revisa los permisos en tu navegador.", "error");
-   document.getElementById('start-btn').style.display = 'inline-flex';
-   document.getElementById('camera-holder').style.display = 'none';
-  });
+ const archivo = input.files[0];
+ const lector = new FileReader();
+ 
+ lector.onload = function(e) {
+ const img = new Image();
+ img.onload = function() {
+ const canvas = document.getElementById("hidden-canvas");
+ const ctx = canvas.getContext("2d");
+ 
+ canvas.width = img.width;
+ canvas.height = img.height;
+ ctx.drawImage(img, 0, 0, img.width, img.height);
+ 
+ const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+ 
+ // Lector liviano jsQR por matriz de píxeles
+ const codigo = jsQR(imgData.data, imgData.width, imgData.height, {
+ inversionAttempts: "dontInvert",
  });
- } catch (e) {
-  console.error("Error de inicialización:", e);
+ 
+ input.value = "";
+ if (codigo) {
+ enviarFichadaAlServidor(codigo.data);
+ } else {
+ mostrarEstado("❌ No se detectó un código QR válido. Asegúrate de enfocar bien el punto y que haya buena luz.", "error");
  }
- }, 100);
+ };
+ img.src = e.target.result;
+ };
+ lector.readAsDataURL(archivo);
  }
 
- function onScanSuccess(decodedText) {
- apagarCamara();
- mostrarEstado("⏳ Registrando punto...", "success");
- 
+ function enviarFichadaAlServidor(textoQR) {
  const guardia = document.getElementById('guardia').value;
  const ahora = new Date();
  
  const nuevoRegistro = {
  fecha_hora: ahora.toLocaleString('es-AR'),
  guardia: guardia,
- punto: decodedText
+ punto: textoQR
  };
-
+ 
  fetch('/api/fichar', {
  method: 'POST',
  headers: { 'Content-Type': 'application/json' },
@@ -220,18 +199,16 @@
  .then(res => res.json())
  .then(data => {
  if(data.success) {
-  mostrarEstado(`<b>Punto Registrado con Éxito</b><br>📍 ${decodedText}<br>🕒 ${nuevoRegistro.fecha_hora}`, "success");
+ mostrarEstado(`<b>Punto Registrado con Éxito</b><br>📍 ${textoQR}<br>🕒 ${nuevoRegistro.fecha_hora}`, "success");
  } else {
-  mostrarEstado("❌ Error al procesar en base de datos Orbis.", "error");
+ mostrarEstado("❌ Error al procesar en base de datos Orbis.", "error");
  }
  })
  .catch(err => {
-  mostrarEstado("❌ Falla de conectividad con el servidor.", "error");
-  console.error(err);
+ mostrarEstado("❌ Falla de conectividad con el servidor central.", "error");
+ console.error(err);
  });
  }
-
- function onScanFailure(error) {}
 
  function mostrarEstado(mensaje, tipo) {
  const s = document.getElementById('status');
@@ -292,4 +269,3 @@
 </script>
 </body>
 </html>
-
